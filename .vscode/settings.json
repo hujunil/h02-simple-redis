@@ -1,3 +1,3 @@
 {
-  "cSpell.words": ["hget", "hgetall", "hset", "thiserror"]
+  "cSpell.words": ["hget", "hgetall", "hmget", "hset", "thiserror"]
 }

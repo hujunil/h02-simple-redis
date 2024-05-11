@@ -40,7 +40,7 @@ pub enum Command {
     HGet(HGet),
     HSet(HSet),
     HGetAll(HGetAll),
-
+    HMGet(HMGet),
     Echo(Echo),
 
     Unrecognized(Unrecognized),
@@ -49,6 +49,12 @@ pub enum Command {
 #[derive(Debug)]
 pub(crate) struct Echo {
     message: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct HMGet {
+    key: String,
+    fields: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -115,6 +121,7 @@ impl TryFrom<RespArray> for Command {
                 b"hset" => HSet::try_from(value).map(Command::HSet),
                 b"hgetall" => HGetAll::try_from(value).map(Command::HGetAll),
                 b"echo" => Echo::try_from(value).map(Command::Echo),
+                b"hmget" => HMGet::try_from(value).map(Command::HMGet),
                 _ => Ok(Command::Unrecognized(Unrecognized)),
             },
             _ => Err(CommandError::InvalidCommand(
@@ -122,6 +129,39 @@ impl TryFrom<RespArray> for Command {
             )),
         }
     }
+}
+
+fn validate_command_for_hmget(
+    value: &RespArray,
+    names: &[&'static str],
+    n_args: usize,
+) -> Result<(), CommandError> {
+    if value.len() < n_args + names.len() {
+        return Err(CommandError::InvalidArgument(format!(
+            "{} command must have at least {} argument",
+            names.join(" "),
+            n_args
+        )));
+    }
+    for (i, name) in names.iter().enumerate() {
+        match value[i] {
+            RespFrame::BulkString(ref cmd) => {
+                if cmd.as_ref().to_ascii_lowercase() != name.as_bytes() {
+                    return Err(CommandError::InvalidCommand(format!(
+                        "Invalid command: expected {}, got {}",
+                        name,
+                        String::from_utf8_lossy(cmd.as_ref())
+                    )));
+                }
+            }
+            _ => {
+                return Err(CommandError::InvalidCommand(
+                    "Command must have a BulkString as the first argument".to_string(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_command(

@@ -1,7 +1,8 @@
 use crate::{Backend, BulkString, RespArray, RespFrame, RespNullBulkString};
 
 use super::{
-    extract_args, validate_command, CommandError, CommandExecutor, HGet, HGetAll, HSet, RESP_OK,
+    extract_args, validate_command, validate_command_for_hmget, CommandError, CommandExecutor,
+    HGet, HGetAll, HMGet, HSet, RESP_OK,
 };
 
 impl CommandExecutor for HGet {
@@ -34,6 +35,28 @@ impl CommandExecutor for HGetAll {
                     .collect::<Vec<RespFrame>>();
 
                 RespArray::new(ret).into()
+            }
+            None => RespArray::new([]).into(),
+        }
+    }
+}
+
+impl CommandExecutor for HMGet {
+    fn execute(self, backend: &Backend) -> RespFrame {
+        let hmap = backend.hmap.get(&self.key);
+        match hmap {
+            Some(hmap) => {
+                let mut data = Vec::with_capacity(self.fields.len());
+
+                for field in &self.fields {
+                    if let Some(value) = hmap.get(field) {
+                        data.push(value.value().clone());
+                    } else {
+                        data.push(RespFrame::NullBulkString(RespNullBulkString));
+                    }
+                }
+
+                RespArray::new(data).into()
             }
             None => RespArray::new([]).into(),
         }
@@ -83,10 +106,46 @@ impl TryFrom<RespArray> for HGetAll {
     }
 }
 
+impl TryFrom<RespArray> for HMGet {
+    type Error = CommandError;
+
+    fn try_from(value: RespArray) -> Result<Self, Self::Error> {
+        // hmget key field [field ...], 至少有两个参数
+        validate_command_for_hmget(&value, &["hmget"], 2)?;
+
+        let args = extract_args(value, 1)?.into_iter();
+
+        let mut ret = HMGet {
+            key: String::from(""),
+            fields: vec![],
+        };
+
+        for (i, frame) in args.into_iter().enumerate() {
+            match frame {
+                RespFrame::BulkString(field) => {
+                    if i == 0 {
+                        ret.key = String::from_utf8(field.0)?;
+                    } else {
+                        ret.fields.push(String::from_utf8(field.0)?);
+                    }
+                }
+                _ => {
+                    return Err(CommandError::InvalidArgument(
+                        "Invalid arguments".to_string(),
+                    ))
+                }
+            }
+        }
+
+        Ok(ret)
+    }
+}
+
 impl TryFrom<RespArray> for HSet {
     type Error = CommandError;
 
     fn try_from(value: RespArray) -> Result<Self, Self::Error> {
+        // hset key field value, 有三个参数
         validate_command(&value, &["hset"], 3)?;
 
         let mut args = extract_args(value, 1)?.into_iter();
