@@ -17,6 +17,7 @@ use thiserror::Error;
 pub use self::{
     array::{RespArray, RespNullArray},
     bulk_string::{BulkString, RespNullBulkString},
+    double::Double,
     frame::RespFrame,
     map::RespMap,
     null::RespNull,

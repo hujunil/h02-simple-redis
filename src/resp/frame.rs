@@ -4,6 +4,7 @@ use enum_dispatch::enum_dispatch;
 use super::{
     array::{RespArray, RespNullArray},
     bulk_string::{BulkString, RespNullBulkString},
+    double::Double,
     map::RespMap,
     null::RespNull,
     set::RespSet,
@@ -13,12 +14,12 @@ use super::{
 };
 
 #[enum_dispatch(RespEncode)]
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub enum RespFrame {
     SimpleString(SimpleString),
     SimpleError(SimpleError),
     Integer(i64),
-    Double(f64),
+    Double(Double),
     Boolean(bool),
     BulkString(BulkString),
     NullBulkString(RespNullBulkString),
@@ -74,7 +75,7 @@ impl RespDecode for RespFrame {
                 Ok(frame.into())
             }
             Some(b',') => {
-                let frame = f64::decode(buf)?;
+                let frame = Double::decode(buf)?;
                 Ok(frame.into())
             }
             Some(b'%') => {
@@ -108,7 +109,7 @@ impl RespDecode for RespFrame {
             Some(b'+') => SimpleString::expect_length(buf),
             Some(b'-') => SimpleError::expect_length(buf),
             Some(b'#') => bool::expect_length(buf),
-            Some(b',') => f64::expect_length(buf),
+            Some(b',') => Double::expect_length(buf),
             Some(b'_') => RespNull::expect_length(buf),
             _ => Err(RespError::NotComplete),
         }

@@ -7,6 +7,7 @@ use crate::{Backend, RespArray, RespError, RespFrame, SimpleString};
 mod echo;
 mod hmap;
 mod map;
+mod set;
 
 lazy_static! {
     static ref RESP_OK: RespFrame = SimpleString::new("OK").into();
@@ -42,8 +43,21 @@ pub enum Command {
     HGetAll(HGetAll),
     HMGet(HMGet),
     Echo(Echo),
-
+    SAdd(SAdd),
+    SIsMember(SIsMember),
     Unrecognized(Unrecognized),
+}
+
+#[derive(Debug)]
+pub(crate) struct SAdd {
+    key: String,
+    members: Vec<RespFrame>,
+}
+
+#[derive(Debug)]
+pub(crate) struct SIsMember {
+    key: String,
+    member: RespFrame,
 }
 
 #[derive(Debug)]
@@ -122,6 +136,8 @@ impl TryFrom<RespArray> for Command {
                 b"hgetall" => HGetAll::try_from(value).map(Command::HGetAll),
                 b"echo" => Echo::try_from(value).map(Command::Echo),
                 b"hmget" => HMGet::try_from(value).map(Command::HMGet),
+                b"sadd" => SAdd::try_from(value).map(Command::SAdd),
+                b"sismember" => SIsMember::try_from(value).map(Command::SIsMember),
                 _ => Ok(Command::Unrecognized(Unrecognized)),
             },
             _ => Err(CommandError::InvalidCommand(
