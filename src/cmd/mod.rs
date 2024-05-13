@@ -1,13 +1,23 @@
+mod cmd_echo;
+mod cmd_get;
+mod cmd_hget;
+mod cmd_hgetall;
+mod cmd_hmget;
+mod cmd_hset;
+mod cmd_sadd;
+mod cmd_set;
+mod cmd_sismember;
+
 use enum_dispatch::enum_dispatch;
 use lazy_static::lazy_static;
 use thiserror::Error;
 
 use crate::{Backend, RespArray, RespError, RespFrame, SimpleString};
 
-mod echo;
-mod hmap;
-mod map;
-mod set;
+use self::{
+    cmd_echo::Echo, cmd_get::Get, cmd_hget::HGet, cmd_hgetall::HGetAll, cmd_hmget::HMGet,
+    cmd_hset::HSet, cmd_sadd::SAdd, cmd_set::Set, cmd_sismember::SIsMember,
+};
 
 lazy_static! {
     static ref RESP_OK: RespFrame = SimpleString::new("OK").into();
@@ -46,59 +56,6 @@ pub enum Command {
     SAdd(SAdd),
     SIsMember(SIsMember),
     Unrecognized(Unrecognized),
-}
-
-#[derive(Debug)]
-pub(crate) struct SAdd {
-    key: String,
-    members: Vec<RespFrame>,
-}
-
-#[derive(Debug)]
-pub(crate) struct SIsMember {
-    key: String,
-    member: RespFrame,
-}
-
-#[derive(Debug)]
-pub(crate) struct Echo {
-    message: String,
-}
-
-#[derive(Debug)]
-pub(crate) struct HMGet {
-    key: String,
-    fields: Vec<String>,
-}
-
-#[derive(Debug)]
-pub(crate) struct Get {
-    key: String,
-}
-
-#[derive(Debug)]
-pub(crate) struct Set {
-    key: String,
-    value: RespFrame,
-}
-
-#[derive(Debug)]
-pub(crate) struct HGet {
-    key: String,
-    field: String,
-}
-
-#[derive(Debug)]
-pub(crate) struct HSet {
-    key: String,
-    field: String,
-    value: RespFrame,
-}
-
-#[derive(Debug)]
-pub(crate) struct HGetAll {
-    key: String,
-    sort: bool,
 }
 
 #[derive(Debug)]
@@ -147,7 +104,7 @@ impl TryFrom<RespArray> for Command {
     }
 }
 
-fn validate_command_for_hmget(
+fn validate_command_for_more(
     value: &RespArray,
     names: &[&'static str],
     n_args: usize,
@@ -214,13 +171,16 @@ fn validate_command(
 }
 
 fn extract_args(value: RespArray, start: usize) -> Result<Vec<RespFrame>, CommandError> {
-    Ok(value.0.into_iter().skip(start).collect())
+    match value {
+        RespArray::Array(args) => Ok(args.into_iter().skip(start).collect()),
+        _ => Err(CommandError::InvalidCommand("Invalid command".to_string())),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RespDecode, RespNullBulkString};
+    use crate::{BulkString, RespDecode};
     use anyhow::Result;
     use bytes::BytesMut;
 
@@ -236,7 +196,7 @@ mod tests {
         let backend = Backend::new();
 
         let ret = cmd.execute(&backend);
-        assert_eq!(ret, RespFrame::NullBulkString(RespNullBulkString));
+        assert_eq!(ret, RespFrame::BulkString(BulkString::new_null()));
 
         Ok(())
     }

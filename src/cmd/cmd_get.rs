@@ -1,20 +1,18 @@
-use crate::{Backend, RespArray, RespFrame, RespNullBulkString};
+use crate::{Backend, BulkString, RespArray, RespFrame};
 
-use super::{extract_args, validate_command, CommandError, CommandExecutor, Get, Set, RESP_OK};
+use super::{extract_args, validate_command, CommandError, CommandExecutor};
+
+#[derive(Debug)]
+pub(crate) struct Get {
+    pub(crate) key: String,
+}
 
 impl CommandExecutor for Get {
     fn execute(self, backend: &Backend) -> RespFrame {
         match backend.get(&self.key) {
             Some(value) => value,
-            None => RespFrame::NullBulkString(RespNullBulkString),
+            None => RespFrame::BulkString(BulkString::new_null()),
         }
-    }
-}
-
-impl CommandExecutor for Set {
-    fn execute(self, backend: &crate::Backend) -> RespFrame {
-        backend.set(self.key, self.value);
-        RESP_OK.clone()
     }
 }
 
@@ -28,27 +26,9 @@ impl TryFrom<RespArray> for Get {
 
         match args.next() {
             Some(RespFrame::BulkString(key)) => Ok(Get {
-                key: String::from_utf8(key.0)?,
+                key: String::try_from(key)?,
             }),
             _ => Err(CommandError::InvalidCommand("Invalid key".to_string())),
-        }
-    }
-}
-
-impl TryFrom<RespArray> for Set {
-    type Error = CommandError;
-
-    fn try_from(value: RespArray) -> Result<Self, Self::Error> {
-        validate_command(&value, &["set"], 2)?;
-        let mut args = extract_args(value, 1)?.into_iter();
-        match (args.next(), args.next()) {
-            (Some(RespFrame::BulkString(key)), Some(value)) => Ok(Set {
-                key: String::from_utf8(key.0)?,
-                value,
-            }),
-            _ => Err(CommandError::InvalidArgument(
-                "Invalid key or value".to_string(),
-            )),
         }
     }
 }
@@ -56,7 +36,10 @@ impl TryFrom<RespArray> for Set {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Backend, RespDecode};
+    use crate::{
+        cmd::{cmd_set::Set, RESP_OK},
+        Backend, RespDecode,
+    };
     use anyhow::Result;
     use bytes::BytesMut;
 

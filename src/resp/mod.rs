@@ -15,15 +15,8 @@ use enum_dispatch::enum_dispatch;
 use thiserror::Error;
 
 pub use self::{
-    array::{RespArray, RespNullArray},
-    bulk_string::{BulkString, RespNullBulkString},
-    double::Double,
-    frame::RespFrame,
-    map::RespMap,
-    null::RespNull,
-    set::RespSet,
-    simple_error::SimpleError,
-    simple_string::SimpleString,
+    array::RespArray, bulk_string::BulkString, double::Double, frame::RespFrame, map::RespMap,
+    null::RespNull, set::RespSet, simple_error::SimpleError, simple_string::SimpleString,
 };
 
 const BUF_CAP: usize = 4096;
@@ -123,6 +116,28 @@ fn parse_length(buf: &[u8], prefix: &str) -> Result<(usize, usize), RespError> {
     let end = extract_simple_frame_data(buf, prefix)?;
     let s = String::from_utf8_lossy(&buf[prefix.len()..end]);
     Ok((end, s.parse()?))
+}
+
+fn parse_length2(buf: &[u8], prefix: &str) -> Result<(usize, isize), RespError> {
+    if buf.len() < 3 {
+        return Err(RespError::NotComplete);
+    }
+
+    if !buf.starts_with(prefix.as_bytes()) {
+        return Err(RespError::InvalidFrame(format!(
+            "Expect prefix '{}', but got '{:?}'",
+            prefix, buf[0]
+        )));
+    }
+
+    let end = find_crlf(buf, 1).ok_or(RespError::NotComplete)?;
+
+    let len = std::str::from_utf8(&buf[1..end])
+        .map_err(|_| RespError::InvalidFrame("Invalid length".to_string()))?
+        .parse::<isize>()
+        .map_err(|_| RespError::InvalidFrame("Invalid length".to_string()))?;
+
+    Ok((end, len))
 }
 
 fn calc_total_length(buf: &[u8], end: usize, len: usize, prefix: &str) -> Result<usize, RespError> {

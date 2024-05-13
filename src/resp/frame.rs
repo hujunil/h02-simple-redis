@@ -2,15 +2,8 @@ use bytes::BytesMut;
 use enum_dispatch::enum_dispatch;
 
 use super::{
-    array::{RespArray, RespNullArray},
-    bulk_string::{BulkString, RespNullBulkString},
-    double::Double,
-    map::RespMap,
-    null::RespNull,
-    set::RespSet,
-    simple_error::SimpleError,
-    simple_string::SimpleString,
-    RespDecode, RespError,
+    array::RespArray, bulk_string::BulkString, double::Double, map::RespMap, null::RespNull,
+    set::RespSet, simple_error::SimpleError, simple_string::SimpleString, RespDecode, RespError,
 };
 
 #[enum_dispatch(RespEncode)]
@@ -22,11 +15,9 @@ pub enum RespFrame {
     Double(Double),
     Boolean(bool),
     BulkString(BulkString),
-    NullBulkString(RespNullBulkString),
     Null(RespNull),
     Map(RespMap),
     Array(RespArray),
-    NullArray(RespNullArray),
     Set(RespSet),
 }
 
@@ -51,24 +42,13 @@ impl RespDecode for RespFrame {
                 let frame = i64::decode(buf)?;
                 Ok(RespFrame::Integer(frame))
             }
-            Some(b'$') => match RespNullBulkString::decode(buf) {
-                Ok(frame) => Ok(frame.into()),
-                Err(RespError::NotComplete) => Err(RespError::NotComplete),
-                Err(_) => {
-                    let frame = BulkString::decode(buf)?;
-                    Ok(frame.into())
-                }
-            },
+            Some(b'$') => {
+                let frame = BulkString::decode(buf)?;
+                Ok(frame.into())
+            }
             Some(b'*') => {
-                // try null array first
-                match RespNullArray::decode(buf) {
-                    Ok(frame) => Ok(frame.into()),
-                    Err(RespError::NotComplete) => Err(RespError::NotComplete),
-                    Err(_) => {
-                        let frame = RespArray::decode(buf)?;
-                        Ok(frame.into())
-                    }
-                }
+                let frame = RespArray::decode(buf)?;
+                Ok(frame.into())
             }
             Some(b'#') => {
                 let frame = bool::decode(buf)?;
@@ -124,12 +104,12 @@ impl From<&str> for RespFrame {
 
 impl From<&[u8]> for RespFrame {
     fn from(s: &[u8]) -> Self {
-        BulkString(s.to_vec()).into()
+        BulkString::new(s.to_vec()).into()
     }
 }
 
 impl<const N: usize> From<&[u8; N]> for RespFrame {
     fn from(s: &[u8; N]) -> Self {
-        BulkString(s.to_vec()).into()
+        BulkString::new(s.to_vec()).into()
     }
 }

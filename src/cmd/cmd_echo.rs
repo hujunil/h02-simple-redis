@@ -1,6 +1,11 @@
 use crate::{Backend, BulkString, RespArray, RespFrame};
 
-use super::{extract_args, validate_command, CommandError, CommandExecutor, Echo};
+use super::{extract_args, validate_command, CommandError, CommandExecutor};
+
+#[derive(Debug)]
+pub(crate) struct Echo {
+    pub(crate) message: String,
+}
 
 impl CommandExecutor for Echo {
     fn execute(self, _: &Backend) -> RespFrame {
@@ -18,7 +23,7 @@ impl TryFrom<RespArray> for Echo {
 
         match args.next() {
             Some(RespFrame::BulkString(key)) => Ok(Echo {
-                message: String::from_utf8(key.0)?,
+                message: String::try_from(key)?,
             }),
             _ => Err(CommandError::InvalidCommand("Invalid key".to_string())),
         }

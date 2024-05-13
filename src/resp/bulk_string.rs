@@ -1,37 +1,43 @@
-use std::ops::Deref;
-
 use bytes::{Buf, BytesMut};
 
 use crate::{RespDecode, RespEncode, RespError};
 
-use super::{extract_fixed_data, parse_length, CRLF_LEN};
+use super::{parse_length2, CRLF_LEN};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct BulkString(pub(crate) Vec<u8>);
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct RespNullBulkString;
+pub enum BulkString {
+    String(Vec<u8>),
+    Null,
+}
 
 impl RespEncode for BulkString {
     fn encode(self) -> Vec<u8> {
-        let mut buf = Vec::with_capacity(self.0.len() + 16);
-        buf.extend_from_slice(&format!("${}\r\n", self.0.len()).into_bytes());
-        buf.extend_from_slice(&self.0);
-        buf.extend_from_slice(b"\r\n");
-        buf
-    }
-}
-
-impl RespEncode for RespNullBulkString {
-    fn encode(self) -> Vec<u8> {
-        b"$-1\r\n".to_vec()
+        match self {
+            BulkString::String(s) => {
+                let mut buf = Vec::new();
+                buf.extend_from_slice(b"$");
+                buf.extend_from_slice(s.len().to_string().as_bytes());
+                buf.extend_from_slice(b"\r\n");
+                buf.extend_from_slice(&s);
+                buf.extend_from_slice(b"\r\n");
+                buf
+            }
+            BulkString::Null => b"$-1\r\n".to_vec(),
+        }
     }
 }
 
 impl RespDecode for BulkString {
     const PREFIX: &'static str = "$";
+
     fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        let (end, len) = parse_length(buf, Self::PREFIX)?;
+        let (end, len) = parse_length2(buf, Self::PREFIX)?;
+        if len == -1 {
+            return Ok(BulkString::new_null());
+        }
+
+        let len = len as usize;
+
         let remained = &buf[end + CRLF_LEN..];
         if remained.len() < len + CRLF_LEN {
             return Err(RespError::NotComplete);
@@ -39,69 +45,73 @@ impl RespDecode for BulkString {
 
         buf.advance(end + CRLF_LEN);
 
-        let data = buf.split_to(len + CRLF_LEN);
-        Ok(BulkString::new(data[..len].to_vec()))
+        let s = buf.split_to(len);
+        buf.advance(CRLF_LEN);
+
+        Ok(BulkString::new(s.to_vec()))
     }
 
     fn expect_length(buf: &[u8]) -> Result<usize, RespError> {
-        let (end, len) = parse_length(buf, Self::PREFIX)?;
-        Ok(end + CRLF_LEN + len + CRLF_LEN)
-    }
-}
-
-impl RespDecode for RespNullBulkString {
-    const PREFIX: &'static str = "$";
-    fn decode(buf: &mut BytesMut) -> Result<Self, RespError> {
-        extract_fixed_data(buf, "$-1\r\n", "NullBulkString")?;
-        Ok(RespNullBulkString)
-    }
-
-    fn expect_length(_buf: &[u8]) -> Result<usize, RespError> {
-        Ok(5)
+        let (end, len) = parse_length2(buf, Self::PREFIX)?;
+        if len == -1 {
+            Ok(end + CRLF_LEN)
+        } else {
+            Ok(end + CRLF_LEN + (len as usize) + CRLF_LEN)
+        }
     }
 }
 
 impl BulkString {
     pub fn new(s: impl Into<Vec<u8>>) -> Self {
-        BulkString(s.into())
+        BulkString::String(s.into())
+    }
+
+    pub fn new_null() -> Self {
+        BulkString::Null
     }
 }
 
 impl AsRef<[u8]> for BulkString {
     fn as_ref(&self) -> &[u8] {
-        &self.0
+        match self {
+            BulkString::String(s) => s.as_ref(),
+            BulkString::Null => &[],
+        }
     }
 }
 
-impl Deref for BulkString {
-    type Target = Vec<u8>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl From<Vec<u8>> for BulkString {
+    fn from(s: Vec<u8>) -> Self {
+        BulkString::String(s)
     }
 }
 
 impl From<&str> for BulkString {
     fn from(s: &str) -> Self {
-        BulkString(s.as_bytes().to_vec())
-    }
-}
-
-impl From<String> for BulkString {
-    fn from(s: String) -> Self {
-        BulkString(s.into_bytes())
+        BulkString::String(s.as_bytes().to_vec())
     }
 }
 
 impl From<&[u8]> for BulkString {
     fn from(s: &[u8]) -> Self {
-        BulkString(s.to_vec())
+        BulkString::String(s.to_vec())
     }
 }
 
 impl<const N: usize> From<&[u8; N]> for BulkString {
     fn from(s: &[u8; N]) -> Self {
-        BulkString(s.to_vec())
+        BulkString::String(s.to_vec())
+    }
+}
+
+impl TryFrom<BulkString> for String {
+    type Error = RespError;
+
+    fn try_from(value: BulkString) -> Result<Self, Self::Error> {
+        match value {
+            BulkString::String(s) => Ok(String::from_utf8(s)?),
+            BulkString::Null => Err(RespError::InvalidFrame("Null BulkString".to_string())),
+        }
     }
 }
 
@@ -120,7 +130,7 @@ mod tests {
 
     #[test]
     fn test_null_bulk_string_encode() {
-        let frame: RespFrame = RespNullBulkString.into();
+        let frame: RespFrame = BulkString::new_null().into();
         assert_eq!(frame.encode(), b"$-1\r\n");
     }
 
@@ -148,8 +158,8 @@ mod tests {
         let mut buf = BytesMut::new();
         buf.extend_from_slice(b"$-1\r\n");
 
-        let frame = RespNullBulkString::decode(&mut buf)?;
-        assert_eq!(frame, RespNullBulkString);
+        let frame = BulkString::decode(&mut buf)?;
+        assert_eq!(frame, BulkString::Null);
 
         Ok(())
     }
